@@ -1,0 +1,50 @@
+---
+swagger: "2.0"
+info:
+  title: Weather Summary API
+  description: API for retrieving weather summary information
+  version: 1.0.0
+basePath: /api
+schemes:
+  - http
+produces:
+  - application/json
+paths:
+  /weather/summary:
+    get:
+      summary: Get weather summary data
+      description: Returns a summary of weather data by year and station ID. If
+        station_id is provided, results will be filtered by that station.
+      parameters:
+        - name: station_id
+          in: query
+          description: Station ID to filter results by
+          required: false
+          type: string
+      responses:
+        "200":
+          description: Successful response
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                year:
+                  type: string
+                  format: YYYY
+                  description: Year of the summary data
+                station_id:
+                  type: string
+                  description: Station ID for the summary data
+                avg_max_temp:
+                  type: number
+                  format: float
+                  description: Average maximum temperature for the year and station
+                avg_min_temp:
+                  type: number
+                  format: float
+                  description: Average minimum temperature for the year and station
+                total_precipitation:
+                  type: number
+                  format: float
+                  description: Total precipitation for the year and station

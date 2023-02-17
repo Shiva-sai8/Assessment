@@ -1,0 +1,52 @@
+---
+swagger: "2.0"
+info:
+  version: 1.0.0
+  title: Weather Stats API
+  description: API to retrieve weather statistics
+host: your_api_host
+basePath: /api
+schemes:
+  - http
+produces:
+  - application/json
+paths:
+  /weather/stats:
+    get:
+      summary: Get weather statistics
+      description: Retrieves the minimum, maximum, and average temperature for each
+        weather_app station and year
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                station_id:
+                  type: string
+                  description: The ID of the weather station
+                year:
+                  type: number
+                  description: The year for the weather statistics
+                min_temp:
+                  type: number
+                  format: float
+                  description: The minimum temperature for the year
+                max_temp:
+                  type: number
+                  format: float
+                  description: The maximum temperature for the year
+                avg_temp:
+                  type: number
+                  format: float
+                  description: The average temperature for the year
+              required:
+                - station_id
+                - year
+                - min_temp
+                - max_temp
+                - avg_temp
+      tags:
+        - Weather

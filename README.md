@@ -62,3 +62,6 @@ If no query param is passed, it will return the summary of all weather stations 
 Examples:
 1. http://localhost:5000/api/weather/summary?station_id=USC00115326
 2. http://localhost:5000/api/weather/summary
+
+### To add a new endpoint/API:
+Create an endpoint in weather_app/app.py.

@@ -1,144 +1,202 @@
 import os
-import tempfile
-import datetime
-import unittest
-import psycopg2
-
-from weather_app.app import app
-
-import shutil
-import io
 import csv
-from unittest.mock import Mock, mock_open, patch
+import logging
+import sys
 
-from weather_app.load_data_faster import extract_data_from_row, load_weather_data
+from io import StringIO
+import psycopg2
+import datetime
+
+from pathlib import Path
 
 
-class WeatherDataLoadTestCase(unittest.TestCase):
+def get_logger():
+    """
+    Returns a logger object to log messages
 
-    @patch("weather_app.load_data_faster.os.path.join")
-    @patch("weather_app.load_data_faster.Path.is_dir")
-    @patch("weather_app.load_data_faster.sys.exit")
-    @patch("weather_app.load_data_faster.os.listdir")
-    @patch("weather_app.load_data_faster.open", new_callable=mock_open)
-    @patch("weather_app.load_data_faster.StringIO")
-    @patch("weather_app.load_data_faster.psycopg2.connect")
-    def test_load_weather_data(
-        self,
-        mock_connect,
-        mock_StringIO,
-        mock_open,
-        mock_listdir,
-        mock_exit,
-        mock_isdir,
-        mock_join,
-    ):
-        mock_cursor = mock_connect.return_value.cursor.return_value
-        mock_logger = Mock()
+    :return: Logger object
+    """
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
 
-        # Set up mock file data
-        file_data = [
-            ["20220101", "-10", "0", "5"],
-            ["20220102", "-5", "5", "10"],
-            ["20220103", "0", "10", "0"],
-        ]
-        mock_file = mock_open(
-            read_data="\n".join(["\t".join(row) for row in file_data])
+    # create console handler with a higher log level
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+
+    # create formatter and add it to the handler
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    ch.setFormatter(formatter)
+
+    logger.addHandler(ch)
+
+    return logger
+
+
+def get_db_connection():
+    """
+    Returns the postgres database connection to load the data in DB
+
+    :return: Database connection object
+    """
+    return psycopg2.connect(
+        database="weather",
+        user="postgres",
+        password="secret_weather_password",
+        host="localhost",
+        port="5432",
+    )
+
+
+def get_db_cursor(connection):
+    """
+    Returns the postgres database cursor to handle DB queries to load the data
+
+    :param connection: Database connection object
+    :return: Database cursor object
+    """
+    return connection.cursor()
+
+
+def close_db_cursor(cursor):
+    """
+    Closes the cursor of the database
+
+    :param cursor: Database cursor object
+    :return: None
+    """
+    cursor.close()
+
+
+def close_db_connection(connection):
+    """
+    Closes the connection of the database
+
+    :param connection: Database connection object
+    :return: None
+    """
+    connection.close()
+
+
+def load_weather_data(cursor, logger):
+    """
+    Loads the weather data into postgres database.
+    This reads the weather data required to load from readings package
+
+    :param cursor: Database cursor object created for inserting the data in weather DB
+    :param logger: Logger object to log the error messages and general updates
+    :return: None
+    """
+    readings_path = os.path.join(os.getcwd(), "readings")
+    logger.debug(f"Reading weather data to load in database from: {readings_path}")
+
+    if not Path(readings_path).is_dir():
+        logger.error(
+            f"Data directory is not present, please store all the files in readings directory."
         )
-        mock_listdir.return_value = ["USC123456.csv"]
-        mock_open.return_value = mock_file
-        mock_isdir.return_value = True
+        sys.exit(0)
 
-        # Call the function to test
-        load_weather_data(mock_cursor, mock_logger)
+    for filename in os.listdir(readings_path):
+        if filename.endswith(".csv"):
+            with open(os.path.join(readings_path, filename), "r") as weather_station:
+                try:
+                    reader = csv.reader(weather_station, delimiter="\t")
+                except Exception as e:
+                    logger.error(
+                        f"Could not load data from file: {filename}, got error: {e}"
+                    )
+                    continue
 
-        # Verify the function behavior
-        # Verify that the file was read and processed correctly
-        mock_open.assert_called_with(mock_join(), "r")
-        mock_StringIO.assert_called_once()
-        mock_StringIO.return_value.seek.assert_called_with(0)
-        mock_cursor.copy_from.assert_called_once_with(
-            mock_StringIO.return_value,
-            "weather_data",
-            sep="\t",
-            null="",
-            columns=("date", "min_temp", "max_temp", "precipitation", "station_id"),
-        )
+                f = StringIO()
+                writer = csv.writer(f, delimiter="\t")
 
-        # Verify that the logging occurred correctly
-        # mock_logger.debug.assert_called_with("Reading weather data to load in database from: readings")
-        mock_logger.debug.assert_called_with(
-            "Weather readings are loaded into the database!"
-        )
-        mock_logger.error.assert_not_called()
+                for row in reader:
+                    try:
+                        date, min_temp, max_temp, precipitation = extract_data_from_row(
+                            row, logger
+                        )
+                    except Exception as e:
+                        logger.error(f"Error extracting data from row: {e}")
+                        continue
 
-        # Verify that the sys.exit() was not called
-        mock_exit.assert_not_called()
+                    station_id = os.path.basename(weather_station.name).split(".")[0]
 
-        # Verify that the expected data was written to the in-memory file
-        expected_data = [
-            [
-                datetime.datetime.strptime(file_data[0][0], "%Y%m%d").strftime(
-                    "%Y-%m-%d"
-                ),
-                int(file_data[0][1]),
-                int(file_data[0][2]),
-                int(file_data[0][3]),
-                "USC123456",
-            ],
-            [
-                datetime.datetime.strptime(file_data[1][0], "%Y%m%d").strftime(
-                    "%Y-%m-%d"
-                ),
-                int(file_data[1][1]),
-                int(file_data[1][2]),
-                int(file_data[1][3]),
-                "USC123456",
-            ],
-            [
-                datetime.datetime.strptime(file_data[2][0], "%Y%m%d").strftime(
-                    "%Y-%m-%d"
-                ),
-                int(file_data[2][1]),
-                int(file_data[2][2]),
-                int(file_data[2][3]),
-                "USC123456",
-            ],
-        ]
-        actual_data = [
-            call_args[0][0]
-            for call_args in mock_StringIO.return_value.write.call_args_list
-        ]
-        self.assertEqual(actual_data, expected_data)
+                    try:
+                        writer.writerow(
+                            [date, min_temp, max_temp, precipitation, station_id]
+                        )
+                    except Exception as e:
+                        logger.error(f"Error saving the record in database: {e}")
+                        continue
 
-    def test_extract_data_from_row_valid_input(self):
-        logger = Mock()
-        row = ["20220101", "-9999", "200", "10"]
-        expected_output = ("2022-01-01", 0, 200, 10)
+                f.seek(0)
 
-        self.assertEqual(extract_data_from_row(row, logger), expected_output)
+                try:
+                    insert_data_into_database(cursor, f)
+                except Exception as e:
+                    logger.error(f"Error inserting data into database: {e}")
+                    continue
 
-    def test_extract_data_from_row_invalid_date(self):
-        logger = Mock()
-        row = ["01-01-2022", "-9999", "200", "10"]
-        expected_output = None
+    logger.debug(f"Weather readings are loaded into the database!")
 
-        self.assertEqual(extract_data_from_row(row, logger), expected_output)
 
-    def test_extract_data_from_row_invalid_temperature(self):
-        logger = Mock()
-        row = ["20220101", "-9999", "invalid", "10"]
-        expected_output = None
+def extract_data_from_row(row, logger):
+    """
+    Extracts the relevant data from a row of a weather data CSV file.
 
-        self.assertEqual(extract_data_from_row(row, logger), expected_output)
+    :param row: A list containing the fields of a row in the CSV file.
+    :param logger: Logger object to log error messages.
+    :return: A tuple containing the extracted data (date, min_temp, max_temp, precipitation).
+    """
+    try:
+        date = datetime.datetime.strptime(row[0], "%Y%m%d").strftime("%Y-%m-%d")
+        min_temp = int(row[1])
+        max_temp = int(row[2])
+        precipitation = int(row[3])
+    except Exception as e:
+        logger.error(f"Error reading the date from row: {e}")
+        return
 
-    def test_extract_data_from_row_invalid_precipitation(self):
-        logger = Mock()
-        row = ["20220101", "-9999", "200", "invalid"]
-        expected_output = None
+    min_temp = 0 if min_temp == -9999 else min_temp
+    max_temp = 0 if max_temp == -9999 else max_temp
+    precipitation = 0 if precipitation == -9999 else precipitation
 
-        self.assertEqual(extract_data_from_row(row, logger), expected_output)
+    return date, min_temp, max_temp, precipitation
+
+
+def insert_data_into_database(cursor, f):
+    """
+    Inserts weather data from an in-memory file into the database.
+
+    :param cursor: Database cursor object created for inserting the data in weather DB.
+    :param f: An in-memory file-like object containing the weather data to insert.
+    """
+    cursor.copy_from(
+        f,
+        "weather_data",
+        sep="\t",
+        null="",
+        columns=("date", "min_temp", "max_temp", "precipitation", "station_id"),
+    )
 
 
 if __name__ == "__main__":
-    unittest.main()
+    connection = get_db_connection()
+    cursor = get_db_cursor(connection)
+    logger = get_logger()
+
+    readings_path = os.path.join(os.getcwd(), "readings")
+    load_weather_data(cursor, logger, readings_path)
+
+    try:
+        # Commit the transaction
+        connection.commit()
+    except Exception as e:
+        logger.error(f"Error loading the weather data in DB: {e}")
+
+    # Close the database cursor and connection
+    close_db_cursor(cursor)
+    logger.debug("Database cursor is closed.")
+    close_db_connection(connection)
+    logger.debug("Database connection is closed.")

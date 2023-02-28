@@ -7,7 +7,7 @@ Database username: postgres
 Database password: secret_weather_password  
 Database name: weather
 
-###Steps to start postgres in docker:
+### Steps to start postgres in docker:
 1. docker container stop weather-app-postgres (this stops the container if there is already a one runnning)
 2. docker rm -f weather-app-postgres
 3. docker run --name weather-app-postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=secret_weather_password -e POSTGRES_DB=weather -p 5432:5432 -d postgres
